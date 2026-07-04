@@ -1,0 +1,55 @@
+name: Deploy to EC2 by Instance Tag
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      INSTANCE_TAG: devec2
+      AWS_REGION: ap-south-1
+      PUBLIC_IP: 13.234.204.162      
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get EC2 Public IP by Tag
+        id: ec2
+        run: |
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${INSTANCE_TAG}" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].PublicIpAddress" \
+            --output text)
+
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+
+      - name: Copy Website Files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.PUBLIC_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "./*"
+          target: "/var/www/html"
+
+      - name: Restart Apache
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.PUBLIC_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            sudo systemctl restart apache2
